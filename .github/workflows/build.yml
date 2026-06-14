@@ -36,6 +36,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Copy Flutter default launcher icons
+        run: |
+          flutter create --org com.example --project-name template_app /tmp/template_app > /dev/null 2>&1
+          cp -r /tmp/template_app/android/app/src/main/res/mipmap-* android/app/src/main/res/
+
       - name: Build Debug APK
         run: flutter build apk --debug --no-tree-shake-icons
 
