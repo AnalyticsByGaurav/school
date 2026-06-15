@@ -15,6 +15,50 @@ import 'complaints_screen.dart';
 import 'calendar_screen.dart';
 import 'profile_screen.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Role helpers (used throughout this file)
+// ─────────────────────────────────────────────────────────────────────────────
+bool get _isStudent  => Session.userRole == 'student';
+bool get _isParent   => Session.userRole == 'parent';
+bool get _isTeacher  => Session.userRole == 'teacher';
+bool get _isAdmin    => ['admin', 'principal', 'super_admin'].contains(Session.userRole);
+bool get _isStaff    => !_isStudent && !_isParent; // teacher + admin
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Role-based menu item definition
+// ─────────────────────────────────────────────────────────────────────────────
+class _MenuItem {
+  final IconData icon;
+  final String label;
+  final Widget screen;
+  final bool visible;
+
+  const _MenuItem({
+    required this.icon,
+    required this.label,
+    required this.screen,
+    this.visible = true,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bottom-nav tab definition (fixed 5 slots)
+// ─────────────────────────────────────────────────────────────────────────────
+class _NavTab {
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final Widget screen;
+
+  const _NavTab({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.screen,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -24,17 +68,123 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
 
-  final List<Widget> _tabs = const [
-    DashboardScreen(),
-    NoticesScreen(),
-    AttendanceScreen(),
-    HomeworkScreen(),
-    ProfileScreen(),
+  // ── Bottom-nav tabs (role-aware) ────────────────────────────────────────
+  late final List<_NavTab> _navTabs = _buildNavTabs();
+
+  List<_NavTab> _buildNavTabs() {
+    final tabs = <_NavTab>[];
+
+    // Dashboard — everyone
+    tabs.add(const _NavTab(
+      icon: Icons.dashboard_outlined, selectedIcon: Icons.dashboard,
+      label: 'Home', screen: DashboardScreen(),
+    ));
+
+    // Notices — everyone
+    tabs.add(const _NavTab(
+      icon: Icons.notifications_outlined, selectedIcon: Icons.notifications,
+      label: 'Notices', screen: NoticesScreen(),
+    ));
+
+    // Attendance — everyone (screen adapts by role)
+    tabs.add(const _NavTab(
+      icon: Icons.check_circle_outline, selectedIcon: Icons.check_circle,
+      label: 'Attendance', screen: AttendanceScreen(),
+    ));
+
+    // 4th tab: role-specific quick access
+    if (_isStudent || _isParent) {
+      // Students/parents access fees directly
+      tabs.add(const _NavTab(
+        icon: Icons.payments_outlined, selectedIcon: Icons.payments,
+        label: 'Fees', screen: FeesScreen(),
+      ));
+    } else {
+      // Teacher/admin: homework assign + timetable more useful
+      tabs.add(const _NavTab(
+        icon: Icons.book_outlined, selectedIcon: Icons.book,
+        label: 'Homework', screen: HomeworkScreen(),
+      ));
+    }
+
+    // Profile — everyone
+    tabs.add(const _NavTab(
+      icon: Icons.person_outline, selectedIcon: Icons.person,
+      label: 'Profile', screen: ProfileScreen(),
+    ));
+
+    return tabs;
+  }
+
+  // ── Drawer menu items (role-filtered) ─────────────────────────────────────
+  List<_MenuItem> get _drawerItems => [
+    _MenuItem(
+      icon: Icons.dashboard, label: 'Dashboard',
+      screen: const DashboardScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.notifications, label: 'Notices',
+      screen: const NoticesScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.check_circle, label: 'Attendance',
+      screen: const AttendanceScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.book, label: 'Homework',
+      screen: const HomeworkScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.payments, label: 'Fees',
+      screen: const FeesScreen(),
+      // Teacher doesn't deal with fees
+      visible: !_isTeacher,
+    ),
+    _MenuItem(
+      icon: Icons.bar_chart, label: 'Results',
+      screen: const ResultsScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.schedule, label: 'Timetable',
+      screen: const TimetableScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.folder_open, label: 'Study Materials',
+      screen: const MaterialsScreen(),
+      // Parents don't use study materials
+      visible: !_isParent,
+    ),
+    _MenuItem(
+      icon: Icons.beach_access, label: 'Leave',
+      screen: const LeaveScreen(),
+      // Parents don't apply leave themselves
+      visible: !_isParent,
+    ),
+    _MenuItem(
+      icon: Icons.report_problem_outlined, label: 'Complaints',
+      screen: const ComplaintsScreen(),
+      // Teachers don't file/view complaints in this flow
+      visible: !_isTeacher,
+    ),
+    _MenuItem(
+      icon: Icons.calendar_month, label: 'Calendar',
+      screen: const CalendarScreen(),
+    ),
+    _MenuItem(
+      icon: Icons.person, label: 'Profile',
+      screen: const ProfileScreen(),
+    ),
   ];
 
-  void _goto(Widget screen) {
-    Navigator.pop(context);
+  // ── Navigation helpers ────────────────────────────────────────────────────
+  void _goToScreen(Widget screen) {
+    Navigator.pop(context); // close drawer
     Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+  }
+
+  void _switchTab(int i) {
+    Navigator.pop(context); // close drawer
+    setState(() => _tab = i);
   }
 
   Future<void> _logout() async {
@@ -51,91 +201,91 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final screens = _navTabs.map((t) => t.screen).toList();
     return Scaffold(
       appBar: AppBar(
-        title: Text(_tabTitle()),
+        title: Text(_navTabs[_tab].label),
         backgroundColor: const Color(0xFF1A56DB),
         foregroundColor: Colors.white,
       ),
       drawer: _buildDrawer(),
-      body: IndexedStack(index: _tab, children: _tabs),
+      body: IndexedStack(index: _tab, children: screens),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.notifications_outlined), selectedIcon: Icon(Icons.notifications), label: 'Notices'),
-          NavigationDestination(icon: Icon(Icons.check_circle_outline), selectedIcon: Icon(Icons.check_circle), label: 'Attendance'),
-          NavigationDestination(icon: Icon(Icons.book_outlined), selectedIcon: Icon(Icons.book), label: 'Homework'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
-        ],
+        destinations: _navTabs.map((t) => NavigationDestination(
+          icon: Icon(t.icon),
+          selectedIcon: Icon(t.selectedIcon),
+          label: t.label,
+        )).toList(),
       ),
     );
-  }
-
-  String _tabTitle() {
-    const titles = ['Dashboard', 'Notices', 'Attendance', 'Homework', 'Profile'];
-    return titles[_tab];
   }
 
   Widget _buildDrawer() {
     final role = Session.roleName.isNotEmpty ? Session.roleName : Session.userRole;
+    final visibleItems = _drawerItems.where((m) => m.visible).toList();
+
     return Drawer(
-      child: Column(
-        children: [
-          UserAccountsDrawerHeader(
-            decoration: const BoxDecoration(color: Color(0xFF1A56DB)),
-            accountName: Text(Session.userName.isNotEmpty ? Session.userName : 'User'),
-            accountEmail: Text(Session.userEmail),
-            currentAccountPicture: CircleAvatar(
-              backgroundColor: Colors.white,
-              child: Text(
-                Session.userName.isNotEmpty ? Session.userName[0].toUpperCase() : 'U',
-                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFF1A56DB)),
-              ),
+      child: Column(children: [
+        UserAccountsDrawerHeader(
+          decoration: const BoxDecoration(color: Color(0xFF1A56DB)),
+          accountName: Text(
+              Session.userName.isNotEmpty ? Session.userName : 'User'),
+          accountEmail: Text(Session.userEmail),
+          currentAccountPicture: CircleAvatar(
+            backgroundColor: Colors.white,
+            child: Text(
+              Session.userName.isNotEmpty
+                  ? Session.userName[0].toUpperCase()
+                  : 'U',
+              style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1A56DB)),
             ),
-            otherAccountsPictures: [
-              Chip(
-                label: Text(role, style: const TextStyle(fontSize: 11, color: Colors.white)),
-                backgroundColor: Colors.white24,
-                padding: EdgeInsets.zero,
+          ),
+          otherAccountsPictures: [
+            Chip(
+              label: Text(role,
+                  style: const TextStyle(fontSize: 11, color: Colors.white)),
+              backgroundColor: Colors.white24,
+              padding: EdgeInsets.zero,
+            ),
+          ],
+        ),
+        Expanded(
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              ...visibleItems.map((item) {
+                // Check if this item maps to one of the bottom-nav tabs
+                final tabIdx = _navTabs.indexWhere(
+                    (t) => t.label == item.label);
+                return ListTile(
+                  leading: Icon(item.icon),
+                  title: Text(item.label),
+                  onTap: tabIdx >= 0
+                      ? () => _switchTab(tabIdx)
+                      : () => _goToScreen(item.screen),
+                  dense: true,
+                );
+              }),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout',
+                    style: TextStyle(color: Colors.red)),
+                onTap: _logout,
+                dense: true,
               ),
             ],
           ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _drawerItem(Icons.dashboard, 'Dashboard', () { Navigator.pop(context); setState(() => _tab = 0); }),
-                _drawerItem(Icons.notifications, 'Notices', () { Navigator.pop(context); setState(() => _tab = 1); }),
-                _drawerItem(Icons.check_circle, 'Attendance', () { Navigator.pop(context); setState(() => _tab = 2); }),
-                _drawerItem(Icons.book, 'Homework', () { Navigator.pop(context); setState(() => _tab = 3); }),
-                _drawerItem(Icons.payments, 'Fees', () => _goto(const FeesScreen())),
-                _drawerItem(Icons.bar_chart, 'Results', () => _goto(const ResultsScreen())),
-                _drawerItem(Icons.schedule, 'Timetable', () => _goto(const TimetableScreen())),
-                _drawerItem(Icons.folder_open, 'Study Materials', () => _goto(const MaterialsScreen())),
-                _drawerItem(Icons.beach_access, 'Leave', () => _goto(const LeaveScreen())),
-                _drawerItem(Icons.report_problem_outlined, 'Complaints', () => _goto(const ComplaintsScreen())),
-                _drawerItem(Icons.calendar_month, 'Calendar', () => _goto(const CalendarScreen())),
-                _drawerItem(Icons.person, 'Profile', () { Navigator.pop(context); setState(() => _tab = 4); }),
-                const Divider(),
-                _drawerItem(Icons.logout, 'Logout', _logout, color: Colors.red),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  ListTile _drawerItem(IconData icon, String label, VoidCallback onTap, {Color? color}) {
-    return ListTile(
-      leading: Icon(icon, color: color),
-      title: Text(label, style: TextStyle(color: color)),
-      onTap: onTap,
-      dense: true,
+        ),
+      ]),
     );
   }
 }
