@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 import '../api/client.dart';
 import '../utils/session.dart';
+import 'attendance_screen.dart';
+import 'fees_screen.dart';
+import 'results_screen.dart';
+import 'timetable_screen.dart';
+import 'materials_screen.dart';
+import 'leave_screen.dart';
+import 'homework_screen.dart';
+import 'notices_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -105,12 +113,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           crossAxisSpacing: 10, mainAxisSpacing: 10,
           childAspectRatio: 1,
           children: [
-            _quickLink(Icons.check_circle, 'Attendance', Colors.teal),
-            _quickLink(Icons.payments, 'Fees', Colors.indigo),
-            _quickLink(Icons.bar_chart, 'Results', Colors.purple),
-            _quickLink(Icons.schedule, 'Timetable', Colors.orange),
-            _quickLink(Icons.folder_open, 'Materials', Colors.blue),
-            _quickLink(Icons.beach_access, 'Leave', Colors.pink),
+            _quickLink(Icons.check_circle,  'Attendance', Colors.teal,   const AttendanceScreen()),
+            _quickLink(Icons.payments,       'Fees',       Colors.indigo, const FeesScreen()),
+            _quickLink(Icons.bar_chart,      'Results',    Colors.purple, const ResultsScreen()),
+            _quickLink(Icons.schedule,       'Timetable',  Colors.orange, const TimetableScreen()),
+            _quickLink(Icons.book,           'Homework',   Colors.blue,   const HomeworkScreen()),
+            _quickLink(Icons.beach_access,   'Leave',      Colors.pink,   const LeaveScreen()),
           ],
         ),
       ],
@@ -134,11 +142,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _quickLink(IconData icon, String label, Color color) {
+  Widget _quickLink(IconData icon, String label, Color color, Widget screen) {
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {},
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => screen)),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             padding: const EdgeInsets.all(10),

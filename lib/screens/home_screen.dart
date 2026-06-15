@@ -77,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Dashboard — everyone
     tabs.add(const _NavTab(
       icon: Icons.dashboard_outlined, selectedIcon: Icons.dashboard,
-      label: 'Home', screen: DashboardScreen(),
+      label: 'Dashboard', screen: DashboardScreen(),
     ));
 
     // Notices — everyone
