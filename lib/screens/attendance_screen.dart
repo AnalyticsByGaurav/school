@@ -8,42 +8,16 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen>
-    with SingleTickerProviderStateMixin {
+class _AttendanceScreenState extends State<AttendanceScreen> {
   static bool get _isTeacher =>
       !['student', 'parent'].contains(Session.userRole);
-
-  late TabController _tabs;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabs = TabController(length: _isTeacher ? 2 : 1, vsync: this);
-  }
-
-  @override
-  void dispose() { _tabs.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
     if (!_isTeacher) return const _StudentAttendanceView();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Attendance'),
-        backgroundColor: const Color(0xFF1A56DB),
-        foregroundColor: Colors.white,
-        bottom: TabBar(
-          controller: _tabs,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: const [Tab(text: 'Mark Attendance'), Tab(text: 'My Attendance')],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabs,
-        children: const [_TeacherMarkView(), _StudentAttendanceView()],
-      ),
+    return const Scaffold(
+      body: _TeacherMarkView(),
     );
   }
 }
@@ -208,35 +182,62 @@ class _TeacherMarkViewState extends State<_TeacherMarkView> {
 
   Future<void> _loadMeta() async {
     setState(() { _metaLoading = true; });
-    final res = await Api.get('api/timetable.php');
-    if (!mounted) return;
+    try {
+      final res = await Api.get('api/timetable.php');
+      if (!mounted) return;
 
-    final days = (res['data']?['days'] as List<dynamic>?) ?? [];
-    final Map<int, Map<String, dynamic>> classMap = {};
-    for (final day in days) {
-      for (final p in ((day as Map)['periods'] as List<dynamic>? ?? [])) {
-        final period = p as Map<String, dynamic>;
-        if (period['is_break'] == 1) continue;
-        final cid = period['class_id'];
-        final sid = period['section_id'];
-        if (cid == null) continue;
-        classMap[cid as int] = {
-          'id': cid,
-          'name': period['class_name'] ?? 'Class $cid',
-          'section_id': sid,
-          'section_name': period['section_name'] ?? '',
-        };
+      final days = (res['data']?['days'] as List<dynamic>?) ?? [];
+      // Key by section_id so multiple sections of the same class all appear
+      final Map<int, Map<String, dynamic>> classMap = {};
+      for (final day in days) {
+        for (final p in ((day as Map)['periods'] as List<dynamic>? ?? [])) {
+          final period = p as Map<String, dynamic>;
+          if (period['is_break'] == 1) continue;
+          final cid = period['class_id'];
+          final sid = period['section_id'];
+          if (cid == null) continue;
+          final key = (sid as int?) ?? (cid as int);
+          classMap[key] = {
+            'id': cid as int,
+            'name': period['class_name'] ?? 'Class $cid',
+            'section_id': sid as int?,
+            'section_name': period['section_name'] ?? '',
+          };
+        }
       }
+
+      // Fallback: if no timetable entries, load all school classes
+      if (classMap.isEmpty) {
+        final clsRes = await Api.get('api/classes.php');
+        if (!mounted) return;
+        final clsList = (clsRes['data']?['classes'] as List<dynamic>?) ?? [];
+        for (final cls in clsList) {
+          final c = cls as Map<String, dynamic>;
+          final cid = (c['class_id'] as num).toInt();
+          final secId = (c['section_id'] as num?)?.toInt();
+          final key = secId ?? cid;
+          classMap[key] = {
+            'id': cid,
+            'name': c['class_name'] as String? ?? '',
+            'section_id': secId,
+            'section_name': c['section_name'] as String? ?? '',
+          };
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _classes = classMap.values.toList();
+        _metaLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _classes = []; _metaLoading = false; });
     }
-    if (!mounted) return;
-    setState(() {
-      _classes = classMap.values.toList();
-      _metaLoading = false;
-    });
   }
 
   Future<void> _loadRoster() async {
-    if (_selClassId == null || _selSectionId == null) return;
+    if (_selClassId == null) return;
     setState(() { _rosterLoading = true; _students = []; _statuses.clear(); });
     final res = await Api.get('api/attendance.php', params: {
       'class_id':   _selClassId,
@@ -323,20 +324,27 @@ class _TeacherMarkViewState extends State<_TeacherMarkView> {
           Row(children: [
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _selClassId,
+                value: _selSectionId ?? _selClassId,
                 decoration: const InputDecoration(
                     labelText: 'Class', border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12)),
-                items: _classes.map((c) => DropdownMenuItem<int>(
-                  value: c['id'] as int,
-                  child: Text('${c['name']} ${c['section_name']}',
-                      overflow: TextOverflow.ellipsis),
-                )).toList(),
+                items: _classes.map((c) {
+                  final uid = (c['section_id'] as int?) ?? (c['id'] as int);
+                  final sec = c['section_name'] as String? ?? '';
+                  return DropdownMenuItem<int>(
+                    value: uid,
+                    child: Text(
+                      sec.isNotEmpty ? '${c['name']} — $sec' : c['name'] as String,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
                 onChanged: (v) {
                   if (v == null) return;
-                  final cls = _classes.firstWhere((c) => c['id'] == v);
+                  final cls = _classes.firstWhere(
+                      (c) => ((c['section_id'] as int?) ?? (c['id'] as int)) == v);
                   setState(() {
-                    _selClassId   = v;
+                    _selClassId   = cls['id'] as int;
                     _selSectionId = cls['section_id'] as int?;
                     _students = [];
                   });
@@ -364,7 +372,7 @@ class _TeacherMarkViewState extends State<_TeacherMarkView> {
                   if (picked != null) {
                     _date = picked.toIso8601String().substring(0, 10);
                     _dateCtrl.text = _date;
-                    if (_selClassId != null) _loadRoster();
+                    if (_selClassId != null || _selSectionId != null) _loadRoster();
                   }
                 },
               ),
@@ -376,7 +384,7 @@ class _TeacherMarkViewState extends State<_TeacherMarkView> {
             child: OutlinedButton.icon(
               icon: const Icon(Icons.search),
               label: const Text('Load Students'),
-              onPressed: _selClassId != null ? _loadRoster : null,
+              onPressed: (_selClassId != null || _selSectionId != null) ? _loadRoster : null,
             ),
           ),
         ]),

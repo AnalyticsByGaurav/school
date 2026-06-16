@@ -29,14 +29,14 @@ class _ResultsScreenState extends State<ResultsScreen> {
   void initState() { super.initState(); _init(); }
 
   Future<void> _init() async {
-    setState(() { _loading = true; _error = ''; });
+    setState(() { _loading = true; _error = ''; _exams = []; _classes = []; });
+    try {
     // Load exams
     final res = await Api.get('api/results.php', params: {'exams': 1});
     if (!mounted) return;
     if (res['success'] != true) {
       setState(() {
         _error = res['message'] as String? ?? 'Failed to load exams';
-        _loading = false;
       });
       return;
     }
@@ -44,11 +44,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
     final exams = d?['exams'] as List<dynamic>? ?? [];
     setState(() { _exams = exams; });
 
-    // For teacher: also load class list from timetable
+    // For teacher: load class list from timetable, fallback to all school classes
     if (_isTeacher) {
       final ttRes = await Api.get('api/timetable.php');
       if (!mounted) return;
       final days = (ttRes['data']?['days'] as List<dynamic>?) ?? [];
+      // Key by section_id so multiple sections of the same class all appear
       final Map<int, Map<String, dynamic>> classMap = {};
       for (final day in days) {
         for (final p in ((day as Map)['periods'] as List<dynamic>? ?? [])) {
@@ -57,24 +58,48 @@ class _ResultsScreenState extends State<ResultsScreen> {
           final cid = period['class_id'];
           final sid = period['section_id'];
           if (cid == null) continue;
-          classMap[cid as int] = {
-            'id': cid,
+          final key = (sid as int?) ?? (cid as int);
+          classMap[key] = {
+            'id': cid as int,
             'name': period['class_name'] ?? 'Class $cid',
-            'section_id': sid,
+            'section_id': sid as int?,
             'section_name': period['section_name'] ?? '',
           };
         }
       }
+
+      if (classMap.isEmpty) {
+        final clsRes = await Api.get('api/classes.php');
+        if (!mounted) return;
+        final clsList = (clsRes['data']?['classes'] as List<dynamic>?) ?? [];
+        for (final cls in clsList) {
+          final c = cls as Map<String, dynamic>;
+          final cid = (c['class_id'] as num).toInt();
+          final secId = (c['section_id'] as num?)?.toInt();
+          final key = secId ?? cid;
+          classMap[key] = {
+            'id': cid,
+            'name': c['class_name'] as String? ?? '',
+            'section_id': secId,
+            'section_name': c['section_name'] as String? ?? '',
+          };
+        }
+      }
+
       if (!mounted) return;
       setState(() { _classes = classMap.values.toList(); });
     }
-
-    setState(() { _loading = false; });
 
     // Auto-select first exam for student
     if (!_isTeacher && exams.isNotEmpty) {
       final first = exams[0] as Map<String, dynamic>;
       _fetchResult(first['id'] as int, null, null);
+    }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _error = 'Failed to load. Please retry.'; });
+    } finally {
+      if (mounted) setState(() { _loading = false; });
     }
   }
 
@@ -156,23 +181,30 @@ class _ResultsScreenState extends State<ResultsScreen> {
             Row(children: [
               Expanded(
                 child: DropdownButtonFormField<int>(
-                  value: _selClassId,
+                  value: _selSectionId ?? _selClassId,
                   decoration: const InputDecoration(
                       labelText: 'Class', border: OutlineInputBorder()),
-                  items: _classes.map((c) => DropdownMenuItem<int>(
-                    value: c['id'] as int,
-                    child: Text('${c['name']} — ${c['section_name']}'),
-                  )).toList(),
+                  items: _classes.map((c) {
+                    final uid = (c['section_id'] as int?) ?? (c['id'] as int);
+                    final sec = c['section_name'] as String? ?? '';
+                    return DropdownMenuItem<int>(
+                      value: uid,
+                      child: Text(sec.isNotEmpty
+                          ? '${c['name']} — $sec'
+                          : c['name'] as String),
+                    );
+                  }).toList(),
                   onChanged: (v) {
                     if (v == null) return;
-                    final cls = _classes.firstWhere((c) => c['id'] == v);
+                    final cls = _classes.firstWhere(
+                        (c) => ((c['section_id'] as int?) ?? (c['id'] as int)) == v);
                     setState(() {
-                      _selClassId   = v;
+                      _selClassId   = cls['id'] as int;
                       _selSectionId = cls['section_id'] as int?;
                       _result = null;
                     });
                     if (_selExamId != null) {
-                      _fetchResult(_selExamId!, v, _selSectionId);
+                      _fetchResult(_selExamId!, cls['id'] as int, cls['section_id'] as int?);
                     }
                   },
                 ),

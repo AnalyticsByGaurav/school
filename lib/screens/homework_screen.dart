@@ -194,57 +194,101 @@ class _AssignHomeworkFormState extends State<_AssignHomeworkForm> {
 
   Future<void> _loadMeta() async {
     setState(() { _metaLoading = true; });
-    final res = await Api.get('api/timetable.php');
-    if (!mounted) return;
+    try {
+      final res = await Api.get('api/timetable.php');
+      if (!mounted) return;
 
-    final days = (res['data']?['days'] as List<dynamic>?) ?? [];
-    final Map<int, Map<String, dynamic>> classMap = {};
-    final Map<int, Map<int, Map<String, dynamic>>> subjectMap = {}; // classId → subjectId → info
+      final days = (res['data']?['days'] as List<dynamic>?) ?? [];
+      // Key by section_id so multiple sections of the same class all appear
+      final Map<int, Map<String, dynamic>> classMap = {};
+      final Map<int, Map<int, Map<String, dynamic>>> subjectMap = {};
 
-    for (final day in days) {
-      for (final p in ((day as Map)['periods'] as List<dynamic>? ?? [])) {
-        final period = p as Map<String, dynamic>;
-        if (period['is_break'] == 1) continue;
-        final cid = period['class_id'];
-        final sid = period['section_id'];
-        final subId = period['subject_id'];
-        if (cid == null || subId == null) continue;
+      for (final day in days) {
+        for (final p in ((day as Map)['periods'] as List<dynamic>? ?? [])) {
+          final period = p as Map<String, dynamic>;
+          if (period['is_break'] == 1) continue;
+          final cid = period['class_id'];
+          final sid = period['section_id'];
+          final subId = period['subject_id'];
+          if (cid == null || subId == null) continue;
 
-        classMap[cid as int] = {
-          'id': cid,
-          'name': period['class_name'] ?? 'Class $cid',
-          'section_id': sid,
-          'section_name': period['section_name'] ?? '',
-        };
+          final key = (sid as int?) ?? (cid as int);
+          classMap[key] = {
+            'id': cid as int,
+            'name': period['class_name'] ?? 'Class $cid',
+            'section_id': sid as int?,
+            'section_name': period['section_name'] ?? '',
+          };
 
-        subjectMap[cid as int] ??= {};
-        subjectMap[cid]![subId as int] = {
-          'id': subId,
-          'name': period['subject_name'] ?? 'Subject $subId',
-        };
+          subjectMap[cid as int] ??= {};
+          subjectMap[cid]![subId as int] = {
+            'id': subId as int,
+            'name': period['subject_name'] ?? 'Subject $subId',
+          };
+        }
       }
+
+      // Fallback: if no timetable entries, load all school classes + subjects
+      if (classMap.isEmpty) {
+        final clsRes = await Api.get('api/classes.php');
+        if (!mounted) return;
+        final clsList = (clsRes['data']?['classes'] as List<dynamic>?) ?? [];
+        for (final cls in clsList) {
+          final c = cls as Map<String, dynamic>;
+          final cid = (c['class_id'] as num).toInt();
+          final secId = (c['section_id'] as num?)?.toInt();
+          final key = secId ?? cid;
+          classMap[key] = {
+            'id': cid,
+            'name': c['class_name'] as String? ?? '',
+            'section_id': secId,
+            'section_name': c['section_name'] as String? ?? '',
+          };
+        }
+
+        // Load all school subjects as fallback
+        final subRes = await Api.get('api/classes.php', params: {'subjects': '1'});
+        if (!mounted) return;
+        final subList = (subRes['data']?['subjects'] as List<dynamic>?) ?? [];
+        final allSubs = <int, Map<String, dynamic>>{};
+        for (final sub in subList) {
+          final s = sub as Map<String, dynamic>;
+          final subId = (s['id'] as num).toInt();
+          allSubs[subId] = {'id': subId, 'name': s['name'] as String? ?? ''};
+        }
+        // Assign all subjects to every class in fallback mode
+        for (final cid in classMap.values.map((c) => c['id'] as int).toSet()) {
+          subjectMap[cid] = Map<int, Map<String, dynamic>>.from(allSubs);
+        }
+      }
+
+      final Map<int, List<Map<String, dynamic>>> subsByClass = {};
+      subjectMap.forEach((cid, subs) {
+        subsByClass[cid] = subs.values.toList();
+      });
+      subsByClass.forEach((k, v) => _subjectsByClass[k] = v);
+
+      if (!mounted) return;
+      setState(() {
+        _classes = classMap.values.toList();
+        _metaLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _classes = []; _metaLoading = false; });
     }
-
-    final Map<int, List<Map<String, dynamic>>> subsByClass = {};
-    subjectMap.forEach((cid, subs) {
-      subsByClass[cid] = subs.values.toList();
-    });
-    subsByClass.forEach((k, v) => _subjectsByClass[k] = v);
-
-    if (!mounted) return;
-    setState(() {
-      _classes = classMap.values.toList();
-      _metaLoading = false;
-    });
   }
 
-  void _onClassChanged(int? classId) {
-    if (classId == null) return;
-    final cls = _classes.firstWhere((c) => c['id'] == classId);
+  void _onClassChanged(int? uid) {
+    if (uid == null) return;
+    // uid is section_id when set, else class_id
+    final cls = _classes.firstWhere(
+        (c) => ((c['section_id'] as int?) ?? (c['id'] as int)) == uid);
+    final cid = cls['id'] as int;
     setState(() {
-      _selClassId   = classId;
+      _selClassId   = cid;
       _selSectionId = cls['section_id'] as int?;
-      _subjects     = _subjectsByClass[classId] ?? [];
+      _subjects     = _subjectsByClass[cid] ?? [];
       _selSubjectId = null;
     });
   }
@@ -286,7 +330,7 @@ class _AssignHomeworkFormState extends State<_AssignHomeworkForm> {
     if (_classes.isEmpty) {
       return const Center(child: Padding(
         padding: EdgeInsets.all(24),
-        child: Text('No classes assigned to you in the timetable.',
+        child: Text('No classes found. Contact admin to set up the timetable.',
             textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
       ));
     }
@@ -305,12 +349,16 @@ class _AssignHomeworkFormState extends State<_AssignHomeworkForm> {
           ),
 
         DropdownButtonFormField<int>(
-          value: _selClassId,
+          value: _selSectionId ?? _selClassId,
           decoration: const InputDecoration(labelText: 'Class *', border: OutlineInputBorder()),
-          items: _classes.map((c) => DropdownMenuItem<int>(
-            value: c['id'] as int,
-            child: Text('${c['name']} — ${c['section_name']}'),
-          )).toList(),
+          items: _classes.map((c) {
+            final uid = (c['section_id'] as int?) ?? (c['id'] as int);
+            final sec = c['section_name'] as String? ?? '';
+            return DropdownMenuItem<int>(
+              value: uid,
+              child: Text(sec.isNotEmpty ? '${c['name']} — $sec' : c['name'] as String),
+            );
+          }).toList(),
           onChanged: _onClassChanged,
         ),
         const SizedBox(height: 16),
